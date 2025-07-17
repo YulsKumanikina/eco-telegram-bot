@@ -1,5 +1,5 @@
 # =========================================================================
-# ===            ФИНАЛЬНАЯ ВЕРСИЯ С ЭКО-ЧЕЛЛЕНДЖАМИ                   ===
+# ===              ФИНАЛЬНАЯ ВЕРСИЯ С 4 КНОПКАМИ В МЕНЮ               ===
 # =========================================================================
 
 import telebot
@@ -19,7 +19,7 @@ import challenges_data as challenges
 from apscheduler.schedulers.background import BackgroundScheduler
 # -------------------------------------
 
-# ... (все ваши глобальные настройки и словари остаются без изменений) ...
+# --- ГЛОБАЛЬНЫЕ НАСТРОЙКИ И СЛОВАРИ ---
 user_context = {}
 STOP_WORDS = set(['и', 'в', 'во', 'не', 'что', 'он', 'на', 'я', 'с', 'со', 'как', 'а', 'то', 'все', 'она', 'так', 'его', 'но', 'да', 'ты', 'к', 'у', 'же', 'вы', 'за', 'бы', 'по', 'только', 'ее', 'мне', 'было', 'вот', 'от', 'меня', 'еще', 'нет', 'о', 'из', 'ему', 'теперь', 'когда', 'даже', 'ну', 'вдруг', 'ли', 'если', 'уже', 'или', 'ни', 'быть', 'был', 'него', 'до', 'вас', 'нибудь', 'опять', 'уж', 'вам', 'ведь', 'там', 'потом', 'себя', 'ничего', 'ей', 'может', 'они', 'тут', 'где', 'есть', 'надо', 'ней', 'для', 'мы', 'тебя', 'их', 'чем', 'была', 'сам', 'чтоб', 'без', 'будто', 'чего', 'раз', 'тоже', 'себе', 'под', 'будет', 'ж', 'тогда', 'кто', 'этот', 'того', 'потому', 'этого', 'какой', 'совсем', 'ним', 'здесь', 'этом', 'один', 'почти', 'мой', 'тем', 'чтобы', 'нее', 'сейчас', 'были', 'куда', 'зачем', 'всех', 'никогда', 'можно', 'при', 'наконец', 'два', 'об', 'другой', 'хоть', 'после', 'над', 'больше', 'тот', 'через', 'эти', 'нас', 'про', 'всего', 'них', 'какая', 'много', 'разве', 'три', 'эту', 'моя', 'впрочем', 'хорошо', 'свою', 'этой', 'перед', 'иногда', 'лучше', 'чуть', 'том', 'нельзя', 'такой', 'им', 'более', 'всегда', 'конечно', 'всю', 'между', 'такое', 'это'])
 SEARCH_TRIGGERS = ['куда сдать', 'где принимают', 'пункты приема', 'пункты приёма', 'адреса', 'адрес', 'найди', 'найти', 'где', 'куда']
@@ -46,7 +46,6 @@ db.init_db()
 print("Бот (в режиме polling) запущен...")
 
 # --- ЗАГРУЗКА ДАННЫХ ---
-# ... (функция load_data без изменений) ...
 def load_data() -> Tuple[pd.DataFrame, List[dict], List[str]]:
     try:
         points = pd.read_csv(RECYCLING_POINTS_PATH)
@@ -58,14 +57,19 @@ def load_data() -> Tuple[pd.DataFrame, List[dict], List[str]]:
 points_df, knowledge_base, interesting_facts = load_data()
 
 # --- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ---
-# ... (все ваши вспомогательные функции: escape_markdown, create_main_keyboard и т.д. остаются здесь без изменений) ...
 def escape_markdown(text: str) -> str:
     return re.sub(f'([{re.escape(r"_*[]()~`>#+-=|{}.!")}])', r'\\\1', text)
 
 def create_main_keyboard():
+    """Создает главную клавиатуру с основными командами."""
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    # Добавляем новую кнопку для челленджей
-    markup.add(types.KeyboardButton('Найти пункт ♻️'), types.KeyboardButton('Эко-челлендж 💪'), types.KeyboardButton('Эко-факт ✨'))
+    # ИСПРАВЛЕНО: Добавляем 4 кнопки
+    markup.add(
+        types.KeyboardButton('Найти пункт ♻️'), 
+        types.KeyboardButton('Эко-челлендж 💪'), 
+        types.KeyboardButton('Эко-факт ✨'),
+        types.KeyboardButton('Задать вопрос 🧠')
+    )
     return markup
 
 def extract_entities(text: str) -> Tuple[str | None, str | None, str | None]:
@@ -92,8 +96,8 @@ def find_recycling_points(material: str, city: str) -> Tuple[List[dict], List[st
     try:
         synonym_map = {'шины': ['шин', 'покрышк', 'колес'], 'футболк': ['футболк', 'одежд', 'вещи', 'текстиль'], 'бутылк': ['бутылк', 'пэт', 'пластик'], 'пластик': ['пластик', 'пэт', 'бутылк', 'hdpe', 'пнд'], 'батарейк': ['батарейк', 'аккумулятор'], 'бумаг': ['бумаг', 'макулатур', 'картон', 'книг'], 'картон': ['картон', 'макулатур', 'бумаг'], 'книг': ['книг', 'макулатур', 'бумаг'], 'стекл': ['стекл', 'банк'], 'одежд': ['одежд', 'вещи', 'текстиль', 'футболк'], 'металл': ['металл', 'жестян', 'алюмин'], 'крышк': ['крышк'], 'техник': ['техник', 'электроника'], 'опасные отходы': ['опасные отходы', 'ртуть', 'градусник', 'лампочк', 'лампа'], 'зубные щетки': ['зубная щетка', 'зубные щетки']}
         search_terms = []
-        for key in synonym_map.keys():
-            if key in material: search_terms = synonym_map[key]; break
+        for key, values in synonym_map.items():
+            if key in material: search_terms = values; break
         if not search_terms: search_terms = [material]
         city_points = points_df[points_df['city'].str.lower() == city.lower()]
         valid_points = city_points.dropna(subset=['accepts'])
@@ -144,26 +148,21 @@ def check_challenges():
         challenge_id = challenge['challenge_id']
         start_date = date.fromisoformat(challenge['start_date'])
         challenge_info = challenges.CHALLENGES[challenge_id]
-        
         days_passed = (date.today() - start_date).days
-        
         if days_passed >= challenge_info['duration_days']:
-            # Челлендж завершен
             bot.send_message(user_id, challenge_info['end_message'])
             db.end_challenge(user_id)
             print(f"Челлендж {challenge_id} завершен для пользователя {user_id}")
         elif days_passed > 0:
-            # Ежедневное напоминание
             bot.send_message(user_id, f"День {days_passed + 1}: {challenge_info['daily_message']}")
             print(f"Отправлено напоминание для пользователя {user_id}")
-
 
 # --- ОБРАБОТЧИКИ TELEGRAM ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     bot.reply_to(message, "♻️ *Привет\\! Я ваш эко\\-помощник\\.*\n\nИспользуйте кнопки ниже, чтобы начать\\!", parse_mode='MarkdownV2', reply_markup=create_main_keyboard())
 
-# --- НОВЫЕ ОБРАБОТЧИКИ ДЛЯ ЧЕЛЛЕНДЖЕЙ ---
+# --- ОБРАБОТЧИКИ ДЛЯ ЧЕЛЛЕНДЖЕЙ ---
 @bot.message_handler(func=lambda message: message.text == 'Эко-челлендж 💪')
 def handle_challenges_button(message):
     current_challenge = db.get_user_challenge(message.from_user.id)
@@ -176,8 +175,7 @@ def handle_challenges_button(message):
                     f"День {days_passed + 1} из {challenge_info['duration_days']}.\n\n"
                     f"Хотите отказаться от него и выбрать новый?")
         markup = types.InlineKeyboardMarkup()
-        markup.add(types.InlineKeyboardButton("Отказаться и выбрать новый", callback_data="show_all_challenges"))
-        markup.add(types.InlineKeyboardButton("Нет, я продолжаю!", callback_data="cancel_action"))
+        markup.add(types.InlineKeyboardButton("Отказаться и выбрать новый", callback_data="show_all_challenges"), types.InlineKeyboardButton("Нет, я продолжаю!", callback_data="cancel_action"))
         bot.send_message(message.chat.id, response, parse_mode='Markdown', reply_markup=markup)
     else:
         show_all_challenges(message.chat.id)
@@ -192,20 +190,16 @@ def show_all_challenges(chat_id):
 def callback_show_challenge(call):
     challenge_id = call.data.replace('show_challenge_', '')
     challenge_info = challenges.CHALLENGES[challenge_id]
-    response = (f"*{challenge_info['title']}*\n\n"
-                f"{challenge_info['description']}\n\n"
-                f"Длительность: {challenge_info['duration_days']} дней. Готовы принять вызов?")
+    response = (f"*{challenge_info['title']}*\n\n{challenge_info['description']}\n\nДлительность: {challenge_info['duration_days']} дней. Готовы принять вызов?")
     markup = types.InlineKeyboardMarkup()
-    markup.add(types.InlineKeyboardButton("✅ Принять вызов!", callback_data=f"accept_challenge_{challenge_id}"))
-    markup.add(types.InlineKeyboardButton("⬅️ Назад к списку", callback_data="show_all_challenges"))
+    markup.add(types.InlineKeyboardButton("✅ Принять вызов!", callback_data=f"accept_challenge_{challenge_id}"), types.InlineKeyboardButton("⬅️ Назад к списку", callback_data="show_all_challenges"))
     bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=response, parse_mode='Markdown', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('accept_challenge_'))
 def callback_accept_challenge(call):
     challenge_id = call.data.replace('accept_challenge_', '')
     db.start_challenge(call.from_user.id, challenge_id)
-    challenge_info = challenges.CHALLENGES[challenge_id]
-    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=challenge_info['start_message'])
+    bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=challenges.CHALLENGES[challenge_id]['start_message'])
 
 @bot.callback_query_handler(func=lambda call: call.data == 'show_all_challenges')
 def callback_back_to_challenges(call):
@@ -217,8 +211,7 @@ def callback_cancel(call):
     bot.delete_message(call.message.chat.id, call.message.message_id)
     bot.send_message(call.message.chat.id, "Отлично! Продолжаем челлендж! 💪")
 
-# -----------------------------------------------
-
+# --- ОСНОВНЫЕ ОБРАБОТЧИКИ ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith('search_context_'))
 def handle_context_search(call):
     material = call.data.replace('search_context_', '')
@@ -232,12 +225,10 @@ def handle_text(message):
         text = message.text.strip().lower()
         response = ""
 
-        # Обработка кнопок теперь вынесена в отдельные хендлеры,
-        # кроме "Задать вопрос", так как он не требует сложной логики.
-        if text == 'задать вопрос 🧠':
-            bot.reply_to(message, "Слушаю ваш вопрос о переработке отходов!"); return
-        if text == 'эко-факт ✨':
-             bot.reply_to(message, escape_markdown(random.choice(interesting_facts)), parse_mode='MarkdownV2'); return
+        # Обработка кнопок главного меню
+        if text == 'найти пункт ♻️': bot.reply_to(message, "Какой вид вторсырья и в каком городе сдать?\n\nНапример: *Батарейки в Воронеже*", parse_mode='Markdown'); return
+        if text == 'задать вопрос 🧠': bot.reply_to(message, "Слушаю ваш вопрос о переработке отходов!"); return
+        if text == 'эко-факт ✨': bot.reply_to(message, escape_markdown(random.choice(interesting_facts)), parse_mode='MarkdownV2'); return
 
         is_search_query = any(trigger in text for trigger in SEARCH_TRIGGERS)
         material, city, district = extract_entities(text)
@@ -298,9 +289,7 @@ def handle_text(message):
 
 # --- ЗАПУСК БОТА И ПЛАНИРОВЩИКА ---
 if __name__ == "__main__":
-    # Создаем и запускаем планировщик
     scheduler = BackgroundScheduler()
-    # Запускать проверку каждый день в 10:00 утра по времени сервера
     scheduler.add_job(check_challenges, 'cron', hour=10)
     scheduler.start()
     print("Планировщик для проверки челленджей запущен.")
@@ -309,4 +298,4 @@ if __name__ == "__main__":
         bot.polling(none_stop=True)
     except Exception as e:
         print(f"Бот остановился из-за ошибки: {e}")
-        scheduler.shutdown() # Корректно останавливаем планировщик при выходе
+        scheduler.shutdown()
