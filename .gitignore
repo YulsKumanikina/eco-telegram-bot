@@ -11,3 +11,7 @@ config.py
 
 # Файлы IDE (для VS Code)
 .vscode/
+
+# Файлы базы данных
+*.db
+*.db-journal
