@@ -1,6 +1,6 @@
 # =========================================================================
 # ===                  ФИНАЛЬНАЯ ВЕРСИЯ BOT_POLLING.PY                  ===
-# ===             (С постоянными и контекстными кнопками)             ===
+# ===             (С исправлениями и улучшенной логикой)              ===
 # =========================================================================
 
 import telebot
@@ -73,16 +73,19 @@ def extract_entities(text: str) -> Tuple[str | None, str | None, str | None]:
         districts = ['советский', 'ленинский', 'коминтерновский', 'левобережный', 'железнодорожный', 'центральный']
         for d in districts:
             if d in clean_text: district = d; clean_text = clean_text.replace(d, '').replace('район', ''); break
-    if city:
-        temp_material = clean_text.replace(city, '')
-        for trigger in SEARCH_TRIGGERS: temp_material = temp_material.replace(trigger, '')
-        material = temp_material.replace(' в ', ' ').strip()
+    
+    # Логика извлечения материала теперь не зависит от наличия города
+    temp_material = clean_text
+    if city: temp_material = temp_material.replace(city, '')
+    for trigger in SEARCH_TRIGGERS: temp_material = temp_material.replace(trigger, '')
+    material = temp_material.replace(' в ', ' ').strip()
+        
     return material, city, district
 
 def find_recycling_points(material: str, city: str) -> Tuple[List[dict], List[str]]:
     if points_df.empty or not material or not city: return [], []
     try:
-        synonym_map = {'бутылк': ['бутылк', 'пэт', 'пластик'], 'пластик': ['пластик', 'пэт', 'бутылк', 'hdpe', 'пнд'], 'батарейк': ['батарейк', 'аккумулятор'], 'бумаг': ['бумаг', 'макулатур', 'картон', 'книг'], 'картон': ['картон', 'макулатур', 'бумаг'], 'книг': ['книг', 'макулатур', 'бумаг'], 'стекл': ['стекл', 'банк'], 'одежд': ['одежд', 'вещи', 'текстиль'], 'металл': ['металл', 'жестян', 'алюмин'], 'крышк': ['крышк'], 'техник': ['техник', 'электроника'], 'опасные отходы': ['опасные отходы', 'ртуть', 'градусник', 'лампочк', 'лампа']}
+        synonym_map = {'бутылк': ['бутылк', 'пэт', 'пластик'], 'пластик': ['пластик', 'пэт', 'бутылк', 'hdpe', 'пнд'], 'батарейк': ['батарейк', 'аккумулятор'], 'бумаг': ['бумаг', 'макулатур', 'картон', 'книг'], 'картон': ['картон', 'макулатур', 'бумаг'], 'книг': ['книг', 'макулатур', 'бумаг'], 'стекл': ['стекл', 'банк'], 'одежд': ['одежд', 'вещи', 'текстиль'], 'металл': ['металл', 'жестян', 'алюмин'], 'крышк': ['крышк'], 'техник': ['техник', 'электроника'], 'опасные отходы': ['опасные отходы', 'ртуть', 'градусник', 'лампочк', 'лампа'], 'зубные щетки': ['зубная щетка', 'зубные щетки']}
         search_terms = []
         for key, values in synonym_map.items():
             if key in material: search_terms = values; break
@@ -121,12 +124,14 @@ def get_knowledge_answer(question: str) -> Tuple[str, str | None]:
         kb_clean_question = re.sub(r'[^\w\s]', '', item['question'].lower())
         kb_words = set(kb_clean_question.split()) - STOP_WORDS
         score = len(user_words.intersection(kb_words))
-        if score > best_match_score:
+        # ИСПРАВЛЕНИЕ 2: Увеличиваем порог для более точного совпадения
+        if score > best_match_score and score >= 2:
             best_match_score, best_answer = score, item['answer']
             best_context = item.get('context_keyword')
-    return (best_answer, best_context) if best_match_score >= 1 else ("", None)
+    return (best_answer, best_context) if best_match_score >= 2 else ("", None)
 
 def get_gigachat_answer(question: str) -> str:
+    # ... (эта функция без изменений)
     if not giga: return "Извините, модуль GigaChat не был загружен."
     system_prompt = "Твоя роль - эксперт по экологии. Отвечай на вопросы, связанные с экологией, переработкой отходов, защитой природы. Категорически запрещено отвечать на любые другие темы. Если вопрос не по теме, твой стандартный отказ: 'К сожалению, я могу обсуждать только вопросы, связанные с экологией.' Ответ на правильный вопрос должен быть кратким (не более 25 слов)."
     payload = Chat(messages=[Messages(role=MessagesRole.SYSTEM, content=system_prompt), Messages(role=MessagesRole.USER, content=question)], temperature=0.7)
@@ -146,14 +151,12 @@ def send_welcome(message):
                 "Используйте кнопки ниже, чтобы начать\\!")
     bot.reply_to(message, response, parse_mode='MarkdownV2', reply_markup=create_main_keyboard())
 
-# --- ЭТОТ ОБРАБОТЧИК НУЖНО ДОБАВИТЬ ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith('search_context_'))
 def handle_context_search(call):
     material = call.data.replace('search_context_', '')
     bot.answer_callback_query(call.id, f"Ищу пункты для '{material}'...")
     response = f"В каком городе вы хотите найти пункты для *{escape_markdown(material)}*?"
     bot.send_message(call.message.chat.id, response, parse_mode='MarkdownV2')
-# ----------------------------------------
 
 @bot.message_handler(func=lambda message: True)
 def handle_text(message):
@@ -161,60 +164,67 @@ def handle_text(message):
         user_id = message.from_user.id
         text = message.text.strip().lower()
 
+        # --- Обработка кнопок главного меню ---
         if text == 'найти пункт ♻️':
-            response = "Какой вид вторсырья и в каком городе вы хотите сдать?\n\nНапример: *Батарейки в Воронеже*"
-            bot.reply_to(message, response, parse_mode='Markdown')
+            bot.reply_to(message, "Какой вид вторсырья и в каком городе вы хотите сдать?\n\nНапример: *Батарейки в Воронеже*", parse_mode='Markdown')
             return
         if text == 'задать вопрос 🧠':
-            response = "Слушаю ваш вопрос об экологии!"
-            bot.reply_to(message, response)
+            # ИСПРАВЛЕНИЕ 1: Замена текста
+            bot.reply_to(message, "Слушаю ваш вопрос о переработке отходов!")
             return
         if text == 'эко-факт ✨':
-             response = escape_markdown(random.choice(interesting_facts)) if interesting_facts else "Факты закончились!"
-             bot.reply_to(message, response, parse_mode='MarkdownV2')
+             bot.reply_to(message, escape_markdown(random.choice(interesting_facts)), parse_mode='MarkdownV2')
              return
 
+        # ИСПРАВЛЕНИЕ 3: Новая логика обработки запросов
+        # Сначала проверяем, не является ли это запросом на поиск
+        is_search_query = any(trigger in text for trigger in SEARCH_TRIGGERS)
         material, city, district = extract_entities(text)
 
-        if city and not material:
+        if city and not material: # Если указан город, но не указан материал, проверяем контекст
             if user_id in user_context and 'last_material' in user_context[user_id]:
                 material = user_context[user_id]['last_material']
                 print(f"Взят материал '{material}' из контекста для пользователя {user_id}")
+        
+        # Если это запрос на поиск (есть город или ключевые слова "куда сдать" и т.п.)
+        if city or (is_search_query and material):
+            if not city: # Если города нет, но мы поняли, что это поиск
+                user_context[user_id] = {'last_material': material}
+                bot.reply_to(message, f"Отлично, ищем '{material}'. В каком городе?")
+                return
 
-        if city:
-            if not material:
-                response = "Пожалуйста, уточните, что именно вы хотите сдать? Например: 'куда сдать батарейки'."
-            else:
-                all_city_points, search_terms = find_recycling_points(material, city)
-                safe_material = escape_markdown(material)
-                if not all_city_points:
-                    if city.lower() in FALLBACK_POINTS:
-                        fallback = FALLBACK_POINTS[city.lower()]
-                        response = (f"😔 К сожалению, я не нашел специализированных пунктов для '{safe_material}'\\.\n\n"
-                                    f"Но в городе *{escape_markdown(city.capitalize())}* есть универсальный вариант:\n\n"
-                                    f"📍 *{escape_markdown(fallback['name'])}*\n"
-                                    f"   *Адрес:* {escape_markdown(fallback['address'])}\n\n"
-                                    f"⚠️ *Важно:* {escape_markdown(fallback['note'])}")
-                    else:
-                        response = f"К сожалению, в городе {escape_markdown(city.capitalize())} я не нашел пунктов приема для '{safe_material}'\\."
+            # Если есть и город, и материал - ищем пункты
+            all_city_points, search_terms = find_recycling_points(material, city)
+            safe_material = escape_markdown(material)
+            if not all_city_points:
+                if city.lower() in FALLBACK_POINTS:
+                    fallback = FALLBACK_POINTS[city.lower()]
+                    response = (f"😔 К сожалению, я не нашел специализированных пунктов для '{safe_material}'\\.\n\n"
+                                f"Но в городе *{escape_markdown(city.capitalize())}* есть универсальный вариант:\n\n"
+                                f"📍 *{escape_markdown(fallback['name'])}*\n"
+                                f"   *Адрес:* {escape_markdown(fallback['address'])}\n\n"
+                                f"⚠️ *Важно:* {escape_markdown(fallback['note'])}")
                 else:
-                    points_to_show = []
-                    if district:
-                        points_in_district = [p for p in all_city_points if district in p.get('address', '').lower()]
-                        if points_in_district: all_city_points = points_in_district
-                    lebestok_points = [p for p in all_city_points if "седьмой лепесток" in p.get('name', '').lower()]
-                    other_points = [p for p in all_city_points if "седьмой лепесток" not in p.get('name', '').lower()]
-                    if lebestok_points: points_to_show.append(lebestok_points[0])
-                    remaining_slots = MAX_POINTS_TO_SHOW - len(points_to_show)
-                    if other_points and remaining_slots > 0: points_to_show.extend(other_points[:remaining_slots])
-                    if not points_to_show:
-                        response = f"К сожалению, в районе *{escape_markdown(district.capitalize())}* я не нашел подходящих пунктов\\." if district else f"К сожалению, я не нашел подходящих пунктов для '{safe_material}'\\."
-                    else:
-                        header = f"✅ Нашел пункты для '{safe_material}' в городе {escape_markdown(city.capitalize())}:"
-                        if district and any(district in p.get('address', '').lower() for p in points_to_show):
-                            header = f"✅ Нашел пункты для '{safe_material}' в районе *{escape_markdown(district.capitalize())}*:"
-                        response = format_points_response(points_to_show, header, search_terms, material)
+                    response = f"К сожалению, в городе {escape_markdown(city.capitalize())} я не нашел пунктов приема для '{safe_material}'\\."
+            else:
+                points_to_show = []
+                if district:
+                    points_in_district = [p for p in all_city_points if district in p.get('address', '').lower()]
+                    if points_in_district: all_city_points = points_in_district
+                lebestok_points = [p for p in all_city_points if "седьмой лепесток" in p.get('name', '').lower()]
+                other_points = [p for p in all_city_points if "седьмой лепесток" not in p.get('name', '').lower()]
+                if lebestok_points: points_to_show.append(lebestok_points[0])
+                remaining_slots = MAX_POINTS_TO_SHOW - len(points_to_show)
+                if other_points and remaining_slots > 0: points_to_show.extend(other_points[:remaining_slots])
+                if not points_to_show:
+                    response = f"К сожалению, в районе *{escape_markdown(district.capitalize())}* я не нашел подходящих пунктов\\." if district else f"К сожалению, я не нашел подходящих пунктов для '{safe_material}'\\."
+                else:
+                    header = f"✅ Нашел пункты для '{safe_material}' в городе {escape_markdown(city.capitalize())}:"
+                    if district and any(district in p.get('address', '').lower() for p in points_to_show):
+                        header = f"✅ Нашел пункты для '{safe_material}' в районе *{escape_markdown(district.capitalize())}*:"
+                    response = format_points_response(points_to_show, header, search_terms, material)
         else:
+            # Если это не поиск, идем в базу знаний или GigaChat
             answer, context_to_save = get_knowledge_answer(text)
             if answer:
                 response = escape_markdown(answer)
@@ -226,15 +236,13 @@ def handle_text(message):
                     button_text = f"Найти пункты для '{context_to_save}'"
                     callback_data = f"search_context_{context_to_save}"
                     markup.add(types.InlineKeyboardButton(text=button_text, callback_data=callback_data))
-                # Отправляем сообщение здесь, а не выходим из функции
                 bot.reply_to(message, response, parse_mode='MarkdownV2', reply_markup=markup)
-                return # <-- ВАЖНО: выход здесь
+                return
             else:
                 bot.send_chat_action(message.chat.id, 'typing')
                 response_giga = get_gigachat_answer(text)
                 response = escape_markdown(response_giga).replace(r'\*', '*')
-        
-        # Этот блок теперь будет выполняться только для некоторых сценариев
+
         bot.reply_to(message, response, parse_mode='MarkdownV2')
 
     except Exception as e:
