@@ -22,7 +22,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 user_context = {}
 STOP_WORDS = set(['и', 'в', 'во', 'не', 'что', 'он', 'на', 'я', 'с', 'со', 'как', 'а', 'то', 'все', 'она', 'так', 'его', 'но', 'да', 'ты', 'к', 'у', 'же', 'вы', 'за', 'бы', 'по', 'только', 'ее', 'мне', 'было', 'вот', 'от', 'меня', 'еще', 'нет', 'о', 'из', 'ему', 'теперь', 'когда', 'даже', 'ну', 'вдруг', 'ли', 'если', 'уже', 'или', 'ни', 'быть', 'был', 'него', 'до', 'вас', 'нибудь', 'опять', 'уж', 'вам', 'ведь', 'там', 'потом', 'себя', 'ничего', 'ей', 'может', 'они', 'тут', 'где', 'есть', 'надо', 'ней', 'для', 'мы', 'тебя', 'их', 'чем', 'была', 'сам', 'чтоб', 'без', 'будто', 'чего', 'раз', 'тоже', 'себе', 'под', 'будет', 'ж', 'тогда', 'кто', 'этот', 'того', 'потому', 'этого', 'какой', 'совсем', 'ним', 'здесь', 'этом', 'один', 'почти', 'мой', 'тем', 'чтобы', 'нее', 'сейчас', 'были', 'куда', 'зачем', 'всех', 'никогда', 'можно', 'при', 'наконец', 'два', 'об', 'другой', 'хоть', 'после', 'над', 'больше', 'тот', 'через', 'эти', 'нас', 'про', 'всего', 'них', 'какая', 'много', 'разве', 'три', 'эту', 'моя', 'впрочем', 'хорошо', 'свою', 'этой', 'перед', 'иногда', 'лучше', 'чуть', 'том', 'нельзя', 'такой', 'им', 'более', 'всегда', 'конечно', 'всю', 'между', 'такое', 'это'])
 SEARCH_TRIGGERS = ['куда сдать', 'где принимают', 'пункты приема', 'пункты приёма', 'адреса', 'адрес', 'найди', 'найти', 'где', 'куда']
-JUNK_PREFIXES = ['а', 'в', 'и', 'с', 'к', 'по']
+JUNK_WORDS = ['а', 'в', 'и', 'с', 'к', 'по']
 
 # --- КОНФИГУРАЦИЯ ---
 try:
@@ -62,12 +62,7 @@ def escape_markdown(text: str) -> str:
 
 def create_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    markup.add(
-        types.KeyboardButton('Найти пункт ♻️'), 
-        types.KeyboardButton('Задать вопрос 🧠'),
-        types.KeyboardButton('Эко-челлендж 💪'), 
-        types.KeyboardButton('Эко-факт ✨')
-    )
+    markup.add(types.KeyboardButton('Найти пункт ♻️'), types.KeyboardButton('Задать вопрос 🧠'), types.KeyboardButton('Эко-челлендж 💪'), types.KeyboardButton('Эко-факт ✨'))
     markup.add(types.KeyboardButton('Совет дня 💡'))
     return markup
 
@@ -84,10 +79,10 @@ def extract_entities(text: str) -> Tuple[str | None, str | None, str | None]:
     temp_material = clean_text
     if city: temp_material = temp_material.replace(city, '')
     for trigger in SEARCH_TRIGGERS: temp_material = temp_material.replace(trigger, '')
-    material = temp_material.strip()
-    words = material.split()
-    if words and words[0] in JUNK_PREFIXES:
-        material = ' '.join(words[1:])
+    words = temp_material.strip().split()
+    while words and words[0] in JUNK_WORDS: words.pop(0)
+    while words and words[-1] in JUNK_WORDS: words.pop(-1)
+    material = ' '.join(words)
     return material, city, district
 
 def find_recycling_points(material: str, city: str) -> Tuple[List[dict], List[str]]:
@@ -142,7 +137,7 @@ def handle_info_request(text: str) -> str | None:
     text_lower = text.lower()
     for city, point_info in FALLBACK_POINTS.items():
         if point_info['name'].lower() in text_lower:
-            if 'телефон' in text_lower or 'номер' in text_lower: return f"📞 Телефон пункта '{point_info['name']}': {escape_markdown(point_info.get('phone', 'не указан'))}"
+            if 'телефон' in text_lower or 'номер' in text_lower: return f"📞 Телефон пункта '{point_info['name']}': `{escape_markdown(point_info.get('phone', 'не указан'))}`"
             if 'сайт' in text_lower: return f"🌐 Сайт пункта '{point_info['name']}': {escape_markdown(point_info.get('website', 'не указан'))}"
             if 'адрес' in text_lower: return f"📍 Адрес пункта '{point_info['name']}': {escape_markdown(point_info.get('address', 'не указан'))}"
     return None
@@ -206,14 +201,16 @@ def show_all_challenges(chat_id):
 @bot.message_handler(func=lambda message: message.text.startswith('совет дня'))
 def handle_tip_button(message):
     user_id = message.from_user.id
+    tip_of_the_day = random.choice(eco_tips) if eco_tips else "У меня закончились советы на сегодня."
+    response = f"💡 *Случайный совет:*\n\n{escape_markdown(tip_of_the_day)}\n\n"
     markup = types.InlineKeyboardMarkup()
     if db.is_subscribed(user_id):
-        text = "Вы уже подписаны на ежедневную рассылку эко-советов. Хотите отписаться?"
+        response += "Вы подписаны на ежедневную рассылку. Хотите отписаться?"
         markup.add(types.InlineKeyboardButton("Отписаться 🔕", callback_data="unsubscribe_tip"))
     else:
-        text = "Хотите ежедневно получать один полезный совет об экологии и осознанном потреблении?"
+        response += "Хотите получать такие советы каждый день?"
         markup.add(types.InlineKeyboardButton("Подписаться 🔔", callback_data="subscribe_tip"))
-    bot.send_message(user_id, text, reply_markup=markup)
+    bot.send_message(user_id, response, parse_mode='MarkdownV2', reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data in ['subscribe_tip', 'unsubscribe_tip'])
 def callback_subscription(call):
@@ -273,7 +270,7 @@ def handle_text(message):
 
         is_search_query = any(trigger in text for trigger in SEARCH_TRIGGERS)
         material, city, district = extract_entities(text)
-
+        
         is_point_search = material and (city or is_search_query)
 
         if is_point_search:
@@ -284,9 +281,8 @@ def handle_text(message):
                     user_context[user_id] = {'last_material': material}
                     bot.reply_to(message, f"Отлично, ищем '{escape_markdown(material)}'. В каком городе?"); return
             
-            if city and not material:
-                 if user_id in user_context and 'last_material' in user_context[user_id]:
-                    material = user_context[user_id].pop('last_material', None)
+            if not material and city:
+                material = user_context.get(user_id, {}).pop('last_material', None)
 
             if city and material:
                 all_city_points, search_terms = find_recycling_points(material, city)
@@ -297,7 +293,8 @@ def handle_text(message):
                         response = (f"😔 К сожалению, я не нашел специализированных пунктов для '{safe_material}'\\.\n\n"
                                     f"Но в городе *{escape_markdown(city.capitalize())}* есть универсальный вариант:\n\n"
                                     f"📍 *{escape_markdown(fallback['name'])}*\n"
-                                    f"   *Адрес:* {escape_markdown(fallback['address'])}\n\n"
+                                    f"   *Адрес:* {escape_markdown(fallback['address'])}\n"
+                                    f"   *Телефон:* `{escape_markdown(fallback.get('phone', 'не указан'))}`\n\n"
                                     f"⚠️ *Важно:* {escape_markdown(fallback['note'])}")
                     else: response = f"К сожалению, я не нашел пунктов для '{safe_material}' в городе *{escape_markdown(city.capitalize())}*\\."
                 else:
